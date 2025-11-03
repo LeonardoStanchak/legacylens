@@ -9,11 +9,17 @@ import org.springframework.stereotype.Component;
 
 import javax.tools.JavaCompiler;
 import javax.tools.ToolProvider;
-import java.io.*;
-import java.nio.file.*;
+import java.io.BufferedReader;
+import java.io.File;
+import java.io.IOException;
+import java.io.InputStreamReader;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.time.Duration;
 import java.time.Instant;
-import java.util.*;
+import java.util.List;
+import java.util.Set;
+import java.util.TreeSet;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
@@ -25,8 +31,8 @@ public class PlantUmlGeneratorImpl implements UmlGeneratorPort {
     public UmlDiagram generateFromPathOrJar(String source, Path outDir) {
         Instant start = Instant.now();
         log.info("===== [PlantUML] Iniciando geração do diagrama UML =====");
-        log.info("📦 Projeto de origem: {}", source);
-        log.info("📤 Diretório de saída: {}", outDir);
+        log.info("📦 Projeto: {}", source);
+        log.info("📤 Saída: {}", outDir);
 
         StringBuilder puml = new StringBuilder("@startuml\n");
         int count = 0;
@@ -34,44 +40,44 @@ public class PlantUmlGeneratorImpl implements UmlGeneratorPort {
         try {
             Path projectPath = Path.of(source);
             if (!Files.exists(projectPath)) {
-                log.error("❌ Caminho inexistente: {}", projectPath);
+                log.error("❌ Caminho do projeto não encontrado: {}", source);
                 return new UmlDiagram("diagram-error.puml");
             }
 
-            // 🔍 Detecta sistemas de build
+            // Detecta o sistema de build
             Path pom = findFile(projectPath, "pom.xml");
             Path gradle = findFile(projectPath, "build.gradle");
             Path mvnw = findFile(projectPath, "mvnw");
             Path gradlew = findFile(projectPath, "gradlew");
 
             if (pom != null || gradle != null || mvnw != null || gradlew != null) {
-                log.info("🧩 Sistema de build detectado — iniciando compilação automática...");
+                log.info("🧩 Sistema de build detectado — compilando...");
                 compileProject(projectPath, pom, gradle, mvnw, gradlew);
             } else {
-                log.warn("⚠️ Nenhum sistema de build detectado — tentativa de compilação direta via JavaCompiler API.");
+                log.warn("⚠️ Nenhum sistema de build detectado — usando fallback.");
                 compileWithFallback(projectPath);
             }
 
-            // 🔍 Localiza classes compiladas
+            // Localiza as classes compiladas
             Path classesDir = findClassesDirectory(projectPath);
             if (classesDir == null) {
-                log.warn("⚠️ Nenhum diretório de classes encontrado — tentativa de fallback...");
+                log.warn("⚠️ Diretório de classes não encontrado. Executando fallback.");
                 compileWithFallback(projectPath);
                 classesDir = findClassesDirectory(projectPath);
             }
 
             if (classesDir == null) {
-                log.error("❌ Falha ao localizar classes compiladas. Abortando.");
+                log.error("❌ Falha ao localizar diretório de classes. Abortando.");
                 return new UmlDiagram("diagram-error.puml");
             }
 
-            log.info("📁 Diretório de classes: {}", classesDir);
+            log.info("📁 Diretório de classes encontrado: {}", classesDir);
 
-            // 🔎 Detecta pacotes
+            // Detecta pacotes válidos
             Set<String> packages = detectPackages(classesDir);
             log.info("📦 Pacotes detectados: {}", packages.isEmpty() ? "nenhum" : packages);
 
-            // 🔬 Escaneia classes e constrói o diagrama
+            // Escaneia e monta o UML
             try (var scan = new ClassGraph()
                     .overrideClasspath(classesDir.toString())
                     .acceptPackages(packages.toArray(new String[0]))
@@ -80,7 +86,7 @@ public class PlantUmlGeneratorImpl implements UmlGeneratorPort {
                     .scan()) {
 
                 var allClasses = scan.getAllClasses();
-                log.info("📊 Total de classes encontradas: {}", allClasses.size());
+                log.info("📊 Total de classes detectadas: {}", allClasses.size());
 
                 for (ClassInfo ci : allClasses) {
                     if (!ci.isStandardClass()) continue;
@@ -90,13 +96,14 @@ public class PlantUmlGeneratorImpl implements UmlGeneratorPort {
 
                     // Herança
                     if (ci.getSuperclass() != null) {
-                        var sp = ci.getSuperclass();
-                        puml.append(ci.getSimpleName()).append(" --|> ").append(sp.getSimpleName()).append("\n");
+                        puml.append(ci.getSimpleName()).append(" --|> ")
+                                .append(ci.getSuperclass().getSimpleName()).append("\n");
                     }
 
                     // Interfaces
                     for (var itf : ci.getInterfaces()) {
-                        puml.append(ci.getSimpleName()).append(" ..|> ").append(itf.getSimpleName()).append("\n");
+                        puml.append(ci.getSimpleName()).append(" ..|> ")
+                                .append(itf.getSimpleName()).append("\n");
                     }
 
                     if (count >= 500) {
@@ -107,7 +114,7 @@ public class PlantUmlGeneratorImpl implements UmlGeneratorPort {
             }
 
         } catch (Exception e) {
-            log.error("❌ Erro durante a geração do diagrama: {}", e.getMessage(), e);
+            log.error("❌ Erro durante a geração UML: {}", e.getMessage(), e);
         }
 
         puml.append("@enduml\n");
@@ -116,23 +123,23 @@ public class PlantUmlGeneratorImpl implements UmlGeneratorPort {
             Files.createDirectories(outDir);
             Path outFile = outDir.resolve("diagram.puml");
             Files.writeString(outFile, puml.toString());
-            log.info("🖼️ Diagrama gerado com sucesso em {}", outFile);
-        } catch (Exception e) {
-            log.error("❌ Falha ao salvar arquivo .puml: {}", e.getMessage(), e);
+            log.info("🖼️ Diagrama UML gerado com sucesso em {}", outFile);
+        } catch (IOException e) {
+            log.error("❌ Falha ao salvar diagrama: {}", e.getMessage(), e);
             return new UmlDiagram("diagram-error.puml");
         }
 
         long ms = Duration.between(start, Instant.now()).toMillis();
-        log.info("===== [PlantUML] Concluído em {} ms =====", ms);
+        log.info("===== [PlantUML] Processo concluído em {} ms =====", ms);
         return new UmlDiagram("diagram.puml");
     }
 
-    // ==========================================================
-    // 🔍 Busca recursiva
-    // ==========================================================
+    // 🔍 Detectores utilitários
     private Path findFile(Path root, String name) throws IOException {
         try (var s = Files.walk(root, 3)) {
-            return s.filter(p -> p.getFileName().toString().equalsIgnoreCase(name)).findFirst().orElse(null);
+            return s.filter(p -> p.getFileName().toString().equalsIgnoreCase(name))
+                    .findFirst()
+                    .orElse(null);
         }
     }
 
@@ -159,45 +166,29 @@ public class PlantUmlGeneratorImpl implements UmlGeneratorPort {
                     .map(s2 -> s2.substring(0, s2.lastIndexOf('.')))
                     .map(s2 -> s2.contains(".") ? s2.substring(0, s2.lastIndexOf('.')) : s2)
                     .filter(s2 -> !s2.isBlank())
-                    .limit(80)
+                    .limit(100)
                     .collect(Collectors.toCollection(TreeSet::new));
         }
     }
 
-    // ==========================================================
-    // 🔧 Compilação automática universal
-    // ==========================================================
+    // 🔧 Compilação automática (Maven > Gradle > Wrapper > Fallback)
     private void compileProject(Path projectPath, Path pom, Path gradle, Path mvnw, Path gradlew) {
         try {
             ProcessBuilder pb;
-            boolean isWindows = System.getProperty("os.name").toLowerCase().contains("win");
-
             if (mvnw != null && Files.exists(mvnw)) {
-                Path mvnwCmd = mvnw.getParent().resolve("mvnw.cmd");
-                if (isWindows && Files.exists(mvnwCmd)) {
-                    log.info("⚙️ Compilando via Maven Wrapper (Windows mvnw.cmd)...");
-                    pb = new ProcessBuilder(mvnwCmd.toString(), "clean", "compile", "-q");
-                } else {
-                    log.info("⚙️ Compilando via Maven Wrapper (Linux/Mac mvnw)...");
-                    pb = new ProcessBuilder(mvnw.toString(), "clean", "compile", "-q");
-                }
+                log.info("⚙️ Compilando via Maven Wrapper...");
+                pb = new ProcessBuilder("cmd.exe", "/c", mvnw.toAbsolutePath().toString(), "clean", "compile", "-q");
             } else if (pom != null && Files.exists(pom)) {
                 log.info("⚙️ Compilando via Maven...");
-                pb = new ProcessBuilder("mvn", "clean", "compile", "-q");
+                pb = new ProcessBuilder("cmd.exe", "/c", "mvn", "clean", "compile", "-q");
             } else if (gradlew != null && Files.exists(gradlew)) {
-                Path gradlewBat = gradlew.getParent().resolve("gradlew.bat");
-                if (isWindows && Files.exists(gradlewBat)) {
-                    log.info("⚙️ Compilando via Gradle Wrapper (Windows gradlew.bat)...");
-                    pb = new ProcessBuilder(gradlewBat.toString(), "build", "-x", "test");
-                } else {
-                    log.info("⚙️ Compilando via Gradle Wrapper (Linux/Mac gradlew)...");
-                    pb = new ProcessBuilder(gradlew.toString(), "build", "-x", "test");
-                }
+                log.info("⚙️ Compilando via Gradle Wrapper...");
+                pb = new ProcessBuilder("cmd.exe", "/c", gradlew.toAbsolutePath().toString(), "build", "-x", "test");
             } else if (gradle != null && Files.exists(gradle)) {
                 log.info("⚙️ Compilando via Gradle...");
-                pb = new ProcessBuilder("gradle", "build", "-x", "test");
+                pb = new ProcessBuilder("cmd.exe", "/c", "gradle", "build", "-x", "test");
             } else {
-                log.warn("⚠️ Nenhum build system identificado — fallback manual.");
+                log.warn("⚠️ Nenhum build system identificado — fallback direto.");
                 compileWithFallback(projectPath);
                 return;
             }
@@ -212,32 +203,30 @@ public class PlantUmlGeneratorImpl implements UmlGeneratorPort {
 
             boolean success = process.waitFor(3, TimeUnit.MINUTES);
             if (success && process.exitValue() == 0) {
-                log.info("✅ Compilação bem-sucedida via {}", pom != null ? "Maven" : "Gradle");
+                log.info("✅ Compilação concluída com sucesso.");
             } else {
-                log.warn("⚠️ Compilação falhou — executando fallback via JavaCompiler API.");
+                log.warn("⚠️ Compilação falhou — fallback via JavaCompiler API.");
                 compileWithFallback(projectPath);
             }
 
         } catch (Exception e) {
-            log.error("❌ Erro ao executar compilação: {}", e.getMessage());
+            log.error("❌ Erro ao compilar: {}", e.getMessage());
             compileWithFallback(projectPath);
         }
     }
 
-    // ==========================================================
-    // 🧠 Fallback via JavaCompiler API
-    // ==========================================================
+    // 🧠 Fallback manual
     private void compileWithFallback(Path projectPath) {
         try {
             Path srcDir = findSourceDir(projectPath);
             if (srcDir == null) {
-                log.warn("⚠️ Nenhum diretório de código-fonte localizado para fallback.");
+                log.warn("⚠️ Nenhum diretório de código-fonte encontrado.");
                 return;
             }
 
             JavaCompiler compiler = ToolProvider.getSystemJavaCompiler();
             if (compiler == null) {
-                log.error("❌ JDK não disponível (executando com JRE).");
+                log.error("❌ JDK não disponível (JRE detectada).");
                 return;
             }
 
@@ -250,7 +239,7 @@ public class PlantUmlGeneratorImpl implements UmlGeneratorPort {
                     .toList();
 
             if (javaFiles.isEmpty()) {
-                log.warn("⚠️ Nenhum arquivo .java encontrado em {}", srcDir);
+                log.warn("⚠️ Nenhum arquivo .java encontrado para compilação.");
                 return;
             }
 
@@ -258,9 +247,9 @@ public class PlantUmlGeneratorImpl implements UmlGeneratorPort {
             compiler.getTask(null, fm, null, List.of("-d", targetDir.toString()), null,
                     fm.getJavaFileObjectsFromFiles(javaFiles)).call();
 
-            log.info("✅ Fallback JavaCompiler concluído com sucesso em {}", targetDir);
+            log.info("✅ Compilação manual concluída com sucesso em {}", targetDir);
         } catch (Exception e) {
-            log.error("❌ Erro durante fallback JavaCompiler: {}", e.getMessage());
+            log.error("❌ Erro durante fallback de compilação: {}", e.getMessage());
         }
     }
 
