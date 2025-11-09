@@ -1,14 +1,22 @@
 package br.com.legacylens.infrastructure.util;
 
 import lombok.experimental.UtilityClass;
+import lombok.extern.slf4j.Slf4j;
 
+import java.io.IOException;
+import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.HashMap;
 import java.util.Map;
 import java.util.Set;
 
+@Slf4j
 @UtilityClass
 public class LegacyHeuristicsUtil {
 
+    // ==========================================================
+    // 🔹 Métodos originais (não alterar)
+    // ==========================================================
     public String humanizeMethod(String method) {
         Map<String, String> dict = Map.ofEntries(
                 Map.entry("get", "buscar"),
@@ -93,5 +101,65 @@ public class LegacyHeuristicsUtil {
                 || content.contains("SessionBean")
                 || content.contains("InitialContext")
                 || content.contains("lookup(");
+    }
+
+    // ==========================================================
+    // 🧠 NOVO: Heurísticas complementares para ProjectScan / Excel
+    // ==========================================================
+    public Map<String, String> detectLibrariesFromSource(Path root) {
+        Map<String, String> libs = new HashMap<>();
+
+        if (root == null || !Files.exists(root)) {
+            log.warn("⚠️ Caminho inválido para heurísticas de bibliotecas: {}", root);
+            return Map.of(
+                    "architecture", "Desconhecida",
+                    "framework", "Desconhecido",
+                    "logging", "Desconhecido",
+                    "test", "Desconhecido"
+            );
+        }
+
+        try (var stream = Files.walk(root, 6)) {
+            stream.filter(f -> f.toString().endsWith(".java"))
+                    .limit(1000)
+                    .forEach(file -> analyzeJavaFile(file, libs));
+        } catch (IOException e) {
+            log.error("❌ Erro ao varrer projeto para heurísticas: {}", e.getMessage());
+        }
+
+        libs.putIfAbsent("architecture", "Desconhecida");
+        libs.putIfAbsent("framework", "Desconhecido");
+        libs.putIfAbsent("logging", "Desconhecido");
+        libs.putIfAbsent("test", "Desconhecido");
+
+        return libs;
+    }
+
+    private void analyzeJavaFile(Path file, Map<String, String> libs) {
+        try {
+            String code = Files.readString(file);
+
+            // Arquitetura
+            if (code.contains("@SpringBootApplication")) libs.put("architecture", "Spring Boot");
+            else if (isLegacyEJB(code)) libs.put("architecture", "JEE / EJB");
+            else if (code.contains("@Microservice")) libs.put("architecture", "Microsserviço");
+
+            // Framework Web
+            if (code.contains("@RestController")) libs.put("framework", "Spring REST");
+            else if (code.contains("javax.servlet")) libs.put("framework", "Servlet");
+            else if (code.contains("JSF")) libs.put("framework", "JSF");
+
+            // Logging
+            if (code.contains("log4j")) libs.put("logging", "Log4J");
+            else if (code.contains("slf4j")) libs.put("logging", "SLF4J");
+            else if (code.contains("logback")) libs.put("logging", "Logback");
+
+            // Testes
+            if (code.contains("org.junit.jupiter")) libs.put("test", "JUnit5");
+            else if (code.contains("org.junit")) libs.put("test", "JUnit4");
+            else if (code.contains("org.testng")) libs.put("test", "TestNG");
+
+        } catch (IOException ignored) {
+        }
     }
 }

@@ -2,6 +2,7 @@ package br.com.legacylens.infrastructure.impl;
 
 import br.com.legacylens.domain.model.ProjectScan;
 import br.com.legacylens.domain.ports.ProjectScannerPort;
+import br.com.legacylens.infrastructure.util.LegacyHeuristicsUtil;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
@@ -9,6 +10,10 @@ import java.nio.file.*;
 import java.util.Map;
 import java.util.regex.*;
 
+/**
+ * 📗 Analisa projetos Gradle (build.gradle ou build.gradle.kts)
+ * Detecta Java e Spring Boot version + aplica heurísticas.
+ */
 @Slf4j
 @Component
 public class GradleProjectScannerImpl implements ProjectScannerPort {
@@ -19,15 +24,25 @@ public class GradleProjectScannerImpl implements ProjectScannerPort {
             Path build = Files.exists(Path.of(dir, "build.gradle"))
                     ? Path.of(dir, "build.gradle")
                     : Path.of(dir, "build.gradle.kts");
+
             String content = Files.readString(build);
 
             String javaVersion = find(content, "sourceCompatibility\\s*=\\s*['\\\"]?(\\d+|\\d+\\.\\d+)['\\\"]?");
             String bootVersion = find(content, "spring-boot\\s*[:=]\\s*['\\\"]?(\\d+\\.\\d+\\.\\d+)['\\\"]?");
 
-            log.info("Projeto Gradle analisado com sucesso. Java={}, Boot={}", javaVersion, bootVersion);
-            return new ProjectScan("GRADLE", javaVersion, null, bootVersion, Map.of());
+            Map<String, String> libs = LegacyHeuristicsUtil.detectLibrariesFromSource(Path.of(dir));
+
+            log.info("""
+                    ✅ Projeto Gradle analisado:
+                      • Java: {}
+                      • Boot: {}
+                      • Libs detectadas: {}
+                    """, javaVersion, bootVersion, libs.size());
+
+            return new ProjectScan("GRADLE", javaVersion, null, bootVersion, libs);
+
         } catch (Exception e) {
-            log.error("Erro ao analisar projeto Gradle: {}", e.getMessage(), e);
+            log.error("❌ Erro ao analisar projeto Gradle: {}", e.getMessage(), e);
             return new ProjectScan("GRADLE_ERROR", null, null, null, Map.of());
         }
     }
