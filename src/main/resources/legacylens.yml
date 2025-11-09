@@ -1,0 +1,139 @@
+# ===================================================================
+# 💠 LegacyLens Configuration
+# -------------------------------------------------------------------
+# Configuração central de execução, módulos, relatórios e heurísticas.
+# Compatível com Spring Boot 3.5.x + Java 17+
+# Lido automaticamente pelo LegacyLensConfigLoader (classpath ou externo).
+# ===================================================================
+
+general:
+  projectName: "LegacyLens"
+  version: "1.0.0"
+  logLevel: "INFO"               # [TRACE|DEBUG|INFO|WARN|ERROR]
+  language: "pt-BR"              # Idioma base para logs e relatórios
+  outputDir: "output"            # Diretório raiz dos artefatos gerados
+  deleteTemp: true               # Remove pastas temporárias após análise
+  timestampedOutput: true        # Cria pastas com timestamp
+  environment: "local"           # local | dev | staging | prod
+
+# ===================================================================
+# 🧱 Módulo UML Estrutural (PlantUMLGenerator)
+# -------------------------------------------------------------------
+# Controla a geração dos diagramas de classes (estrutura estática).
+# ===================================================================
+uml:
+  enabled: true
+  includeInterfaces: true
+  includeAbstract: true           # Compatível com includeAbstractClasses
+  includeAbstractClasses: true    # Suporte retrocompatível
+  includeRelationships: true
+  truncateLongPackages: true
+  maxClasses: 500                 # Evita diagramas excessivos
+  outputName: "diagram.puml"
+  theme: "default"                # default | dark | light | corporate
+  fallbackEnabled: true           # Gera UML mesmo se a compilação falhar
+
+# ===================================================================
+# 📊 Módulo Sequence Diagram (SequenceDiagramExtractor)
+# -------------------------------------------------------------------
+# Controla a geração automática de diagramas de sequência
+# com base no fluxo Controller → Service → Repository.
+# ===================================================================
+sequence:
+  enabled: true
+  mode: engineering               # engineering | raw
+  includeActor: true
+  includeGroups: true
+  translateMethods: true          # Usa heurísticas para nomes de métodos
+  colorTheme: default             # default | corporate | highcontrast
+  maxDepth: 3                     # Controller → Service → Repository
+  outputPattern: "sequence_{controller}.puml"
+  autoDetectArchitecture: true
+  showInternalProcessing: true
+  showNotes: true
+  truncateFields: 10
+  compactMode: auto               # auto | always | never
+  detectRepetitions: true         # Remove chamadas duplicadas
+  cacheControllers: true          # Melhora performance em grandes bases
+
+# ===================================================================
+# 📗 Relatórios (Excel e README)
+# -------------------------------------------------------------------
+# Define a geração de relatórios técnicos e documentação automatizada.
+# ===================================================================
+reports:
+  excel:
+    enabled: true
+    sheetName: "Comparativo Legado x Novo"
+    includeTimestamp: true
+    style: "corporate"
+    autosizeColumns: true
+    maxRows: 5000
+  readme:
+    enabled: true
+    includeDiagrams: true
+    includeSummaryTable: true
+    includeFileStats: true
+    format: "markdown"            # markdown | html
+    language: "pt-BR"
+
+# ===================================================================
+# ⚙️ Execução e Build
+# -------------------------------------------------------------------
+# Controla o comportamento da compilação e análise de projetos legados.
+# ===================================================================
+execution:
+  compileTimeoutMinutes: 5
+  useMavenWrapper: true
+  useGradleWrapper: true
+  fallbackToJavaCompiler: true
+  maxScanDepth: 5
+  skipTests: true
+  cleanBeforeCompile: true
+  detectMultiModule: true  # <--- já existente, mas agora ativo
+
+
+# ===================================================================
+# 🎨 Tema visual (modo Engineering)
+# -------------------------------------------------------------------
+# Define o tema de cores e fonte dos diagramas UML e Sequence.
+# ===================================================================
+theme:
+  actorColor: "#CCCCCC"
+  controllerColor: "#A9D0F5"
+  serviceColor: "#A9F5BC"
+  repositoryColor: "#F5A9A9"
+  noteColor: "#DDDDDD"
+  borderColor: "#B0B0B0"
+  font: "Consolas"
+  fontSize: 12
+
+# ===================================================================
+# 🧪 Validações e Heurísticas
+# -------------------------------------------------------------------
+# Define heurísticas para auto-detecção de arquitetura e DTOs.
+# ===================================================================
+validation:
+  enableSwaggerDetection: true
+  enableHeuristics: true
+  validateDtoFields: true
+  detectArchitecture: true
+  maxMethodScan: 1000
+  ignorePatterns:
+    - "equals"
+    - "hashCode"
+    - "toString"
+    - "builder"
+    - "logger"
+    - "trace"
+
+# ===================================================================
+# ✅ Compatibilidade futura
+# -------------------------------------------------------------------
+# Chaves antigas aceitas automaticamente pelo LegacyLensConfigLoader:
+# - includeAbstractClasses → includeAbstract
+# - includeRelations → includeRelationships
+# - tabName / sheet → sheetName
+# - compileTimeout / timeoutMinutes → compileTimeoutMinutes
+# - ignoredPatterns / ignoreList → ignorePatterns
+# ===================================================================
