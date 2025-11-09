@@ -1,35 +1,53 @@
+######################################################################
+# 🧠 LEGACYLENS — Configuração central (multi-profile)
+# Clean Architecture · Observabilidade · Performance · DX
+######################################################################
+
 spring:
   application:
-    name: legacylens
+    name: LegacyLens
+  main:
+    banner-mode: off
+    allow-bean-definition-overriding: true
 
 server:
   port: 8080
   servlet:
     context-path: /
+  compression:
+    enabled: true
+    mime-types: text/html,text/xml,text/plain,text/css,text/javascript,application/javascript,application/json
+  tomcat:
+    threads:
+      max: 200
+      min-spare: 10
+    accesslog:
+      enabled: false
 
+# 🪵 Logging default (pode ser sobreposto por profile)
 logging:
   level:
     root: INFO
-    br.com.legacylens: DEBUG
+    org.springframework: WARN
+    br.com.legacylens: INFO
   pattern:
     console: "%d{yyyy-MM-dd HH:mm:ss} [%highlight(%-5level)] %cyan(%logger{36}) - %msg%n"
 
+# 📚 OpenAPI/Swagger
 springdoc:
   api-docs:
     path: /api-docs
+    enabled: true
   swagger-ui:
     path: /swagger-ui.html
     operationsSorter: method
     tagsSorter: alpha
     display-request-duration: true
     doc-expansion: none
+    persist-authorization: true
   show-actuator: false
 
-app:
-  output:
-    base-dir: output
-    timestamped: true
-
+# 🩺 Actuator (exposição varia por perfil)
 management:
   endpoints:
     web:
@@ -38,23 +56,230 @@ management:
   endpoint:
     health:
       show-details: when_authorized
+  metrics:
+    export:
+      simple:
+        enabled: true
 
+# ⚙️ App defaults (podem ser lidos nas suas services)
+app:
+  output:
+    base-dir: output
+    timestamped: true
+  report:
+    formats: [UML, SEQUENCE, EXCEL, README]
+  performance:
+    auto-tune: true
+  cleanup:
+    old-repos-days: 7
+  ui:
+    theme: dark
+
+  # 🔌 Feature flags internas do app
+  features:
+    # controla a inteligência automática que ajusta módulos conforme tamanho/arquitetura do projeto
+    yaml-auto-intelligence: true
+    swagger-parsing: true
+    legacy-heuristics: true
+    uml-plant-fallback: true
+
+# 🔧 Integração com o legacylens.yml (externo ou classpath)
+# Essas flags são lidas pelo LegacyLensConfigLoader
+legacylens:
+  config:
+    enabled: true          # ✅ liga/desliga o uso do legacylens.yml
+    prefer-external: true  # se true, tenta ./legacylens.yml antes do classpath
+    # location é opcional; se vazio, loader tenta: ./legacylens.yml -> classpath:legacylens.yml
+    location: ""           # exemplos: "file:./legacylens.yml" ou "classpath:legacylens.yml"
+
+######################################################################
+# 💻 PROFILE: local (DX máxima — logs detalhados, devtools, actuator amplo)
+######################################################################
+---
+spring:
+  config:
+    activate:
+      on-profile: local
+  devtools:
+    add-properties: true
+    restart:
+      enabled: true
+    livereload:
+      enabled: true
+
+server:
+  port: 8080
+  compression:
+    enabled: false
+  tomcat:
+    threads:
+      max: 100
+      min-spare: 5
+
+logging:
+  level:
+    root: DEBUG
+    org.springframework: INFO
+    br.com.legacylens: DEBUG
+  pattern:
+    console: "%d{HH:mm:ss.SSS} [%highlight(%-5level)] %cyan(%logger{36}) - %msg%n"
+  file:
+    name: ""         # desativa log em arquivo local
+  logback:
+    rollingpolicy:
+      enabled: false
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,env,beans,configprops,threaddump,httpexchanges
+  endpoint:
+    health:
+      show-details: always
+
+springdoc:
+  show-actuator: true
+
+app:
+  performance:
+    auto-tune: false
+  output:
+    timestamped: false
+  features:
+    yaml-auto-intelligence: true
+    uml-plant-fallback: true
+
+legacylens:
+  config:
+    enabled: true
+    prefer-external: true     # no local, deixa você trocar o YAML sem rebuild
+    location: ""              # se quiser fixar: file:./legacylens.yml
+
+######################################################################
+# 🧪 PROFILE: dev (equilíbrio entre debug e performance)
+######################################################################
 ---
 spring:
   config:
     activate:
       on-profile: dev
+
+server:
+  port: 8081
+
 logging:
   level:
-    root: DEBUG
-    org.springframework.web: INFO
+    root: INFO
+    org.springframework: INFO
+    br.com.legacylens: DEBUG
 
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,env
+
+app:
+  performance:
+    auto-tune: true
+  output:
+    timestamped: true
+
+legacylens:
+  config:
+    enabled: true
+    prefer-external: true
+    location: ""
+
+######################################################################
+# 🏁 PROFILE: staging (homolog — quase prod, com métricas/actuator úteis)
+######################################################################
+---
+spring:
+  config:
+    activate:
+      on-profile: staging
+
+server:
+  port: 8082
+
+logging:
+  level:
+    root: INFO
+    org.springframework: WARN
+    br.com.legacylens: INFO
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics
+
+app:
+  performance:
+    auto-tune: true
+
+legacylens:
+  config:
+    enabled: true
+    prefer-external: false   # geralmente empacotado com a release
+    location: ""             # use classpath por padrão
+
+######################################################################
+# 🚀 PROFILE: prod (seguro, performático e com logs enxutos)
+######################################################################
 ---
 spring:
   config:
     activate:
       on-profile: prod
+
+server:
+  port: 80
+  compression:
+    enabled: true
+  tomcat:
+    threads:
+      max: 400
+      min-spare: 20
+    accesslog:
+      enabled: true
+
 logging:
   level:
     root: INFO
-    org.springframework.web: WARN
+    org.springframework: ERROR
+    br.com.legacylens: INFO
+  file:
+    name: logs/legacylens.log
+  pattern:
+    console: "%d{yyyy-MM-dd HH:mm:ss} %-5level %logger{36} - %msg%n"
+    file:    "%d{yyyy-MM-dd HH:mm:ss} %-5level %logger{36} - %msg%n"
+  logback:
+    rollingpolicy:
+      file-name-pattern: logs/legacylens-%d{yyyy-MM-dd}.log
+      max-file-size: 20MB
+      total-size-cap: 2GB
+      max-history: 30
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+  endpoint:
+    health:
+      show-details: never
+
+app:
+  performance:
+    auto-tune: true
+  output:
+    timestamped: true
+
+legacylens:
+  config:
+    enabled: true
+    prefer-external: false   # em prod, evite arquivo solto no FS
+    location: ""             # classpath por padrão

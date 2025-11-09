@@ -1,9 +1,9 @@
 package br.com.legacylens.application.impl;
 
 import br.com.legacylens.application.GenerateReportsService;
+import br.com.legacylens.config.LegacyLensConfigLoader;
 import br.com.legacylens.domain.model.ProjectScan;
 import br.com.legacylens.domain.ports.ExcelReportPort;
-import br.com.legacylens.domain.ports.ReadmePort;
 import br.com.legacylens.domain.ports.SequenceDiagramPort;
 import br.com.legacylens.domain.ports.UmlGeneratorPort;
 import lombok.extern.slf4j.Slf4j;
@@ -18,38 +18,40 @@ public class GenerateReportsServiceImpl implements GenerateReportsService {
     private final UmlGeneratorPort uml;
     private final SequenceDiagramPort sequence;
     private final ExcelReportPort excel;
-    private final ReadmePort readme;
 
-    public GenerateReportsServiceImpl(
-            UmlGeneratorPort uml,
-            SequenceDiagramPort sequence,
-            ExcelReportPort excel,
-            ReadmePort readme) {
+    public GenerateReportsServiceImpl(UmlGeneratorPort uml, SequenceDiagramPort sequence, ExcelReportPort excel) {
         this.uml = uml;
         this.sequence = sequence;
         this.excel = excel;
-        this.readme = readme;
     }
 
     @Override
     public void generateAll(ProjectScan scan, String source, Path outDir) {
-        log.info("Gerando relatórios do projeto analisado em {}", outDir);
+        var cfg = LegacyLensConfigLoader.get();
+        log.info("🚀 Iniciando geração de artefatos (sem README) — destino: {}", outDir);
+
         try {
-            log.info("📘 Gerando diagrama estrutural UML...");
-            var  uml1 = uml.generateFromPathOrJar(source, outDir);
-            log.info("chamou", uml1);
-            log.info("📗 Gerando diagrama de sequência...");
-            var sequenceUml = sequence.generateFromPathOrJar(source, outDir);
-            log.info("chamou a sequencia do uml", sequenceUml);
-            log.info("📊 Gerando planilha Excel...");
-            excel.write(scan, outDir);
+            // UML
+            log.info("📘 Gerando diagrama UML...");
+            var umlResult = uml.generateFromPathOrJar(source, outDir);
+            log.debug("UML gerado: {}", umlResult);
 
-            log.info("📝 Gerando README técnico...");
-            readme.write(scan, outDir);
+            // Sequence
+            if (cfg.getSequence() == null || cfg.getSequence().isEnabled()) {
+                log.info("📗 Gerando diagramas de sequência...");
+                sequence.generateFromPathOrJar(source, outDir);
+            }
 
-            log.info("✅ Relatórios concluídos com sucesso em {}", outDir);
+            // Excel
+            if (cfg.getReports() == null || cfg.getReports().getExcel().isEnabled()) {
+                log.info("📊 Gerando planilha Excel...");
+                excel.write(scan, outDir);
+            }
+
+            log.info("✅ Geração concluída em {}", outDir);
+
         } catch (Exception e) {
-            log.error("❌ Erro durante geração dos relatórios: {}", e.getMessage(), e);
+            log.error("❌ Falha na geração de relatórios: {}", e.getMessage(), e);
         }
     }
 }

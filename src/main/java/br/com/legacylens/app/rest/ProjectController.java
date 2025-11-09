@@ -2,6 +2,7 @@ package br.com.legacylens.app.rest;
 
 import br.com.legacylens.application.AnalyzeProjectService;
 import br.com.legacylens.application.GenerateReportsService;
+import br.com.legacylens.config.LegacyLensConfigLoader;
 import br.com.legacylens.domain.model.ProjectScan;
 import lombok.extern.slf4j.Slf4j;
 import org.eclipse.jgit.api.Git;
@@ -16,6 +17,12 @@ import java.util.concurrent.TimeUnit;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipInputStream;
 
+/**
+ * 🚀 ProjectController — entrada principal da API
+ *  - Recebe projetos via upload ZIP ou Git URL.
+ *  - Descompacta, aplica heurísticas automáticas e executa análise.
+ *  - Gera UML + Sequence + Excel (sem README).
+ */
 @Slf4j
 @RestController
 @RequestMapping("/api/projects")
@@ -36,7 +43,8 @@ public class ProjectController {
     // ================================================================
     @PostMapping(path = "/analyze/upload", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     public AnalyzeResponse analyzeUpload(@RequestParam("file") MultipartFile file) throws Exception {
-        log.info("📦 Recebendo arquivo para análise: {}", file.getOriginalFilename());
+        log.info("📦 Recebendo arquivo ZIP: {}", file.getOriginalFilename());
+
         Path tmpDir = Files.createTempDirectory("legacylens_");
         Path uploaded = tmpDir.resolve(file.getOriginalFilename());
         Files.copy(file.getInputStream(), uploaded, StandardCopyOption.REPLACE_EXISTING);
@@ -48,12 +56,17 @@ public class ProjectController {
             projectPath = unzipDir;
         }
 
-        log.info("🔍 Iniciando análise do projeto em: {}", projectPath);
+        // 🧠 Aplica configuração inteligente (arquitetura, módulos, tamanho)
+        applySmartConfiguration(projectPath);
+
+        // 🔍 Executa análise
         var scan = analyze.execute(projectPath.toString());
         Path outDir = Path.of("output", String.valueOf(System.currentTimeMillis()));
         Files.createDirectories(outDir);
+
+        // 📊 Gera relatórios (UML + Sequence + Excel)
         reports.generateAll(scan, projectPath.toString(), outDir);
-        log.info("✅ Análise concluída. Artefatos gerados em: {}", outDir);
+        log.info("✅ Artefatos gerados em: {}", outDir);
 
         return new AnalyzeResponse(outDir.toAbsolutePath().toString(), scan);
     }
@@ -63,67 +76,54 @@ public class ProjectController {
     // ================================================================
     @PostMapping("/analyze/git")
     public AnalyzeResponse analyzeGit(@RequestParam("url") String gitUrl) throws Exception {
-        log.info("🚀 Iniciando análise de repositório Git: {}", gitUrl);
+        log.info("🚀 Iniciando análise via Git: {}", gitUrl);
 
-        // === Diretório fixo para clones ===
         Path baseDir = Paths.get(System.getProperty("user.home"), "Documents", "legados");
-        if (!Files.exists(baseDir)) {
-            Files.createDirectories(baseDir);
-            log.info("📁 Diretório base criado em {}", baseDir);
-        }
+        Files.createDirectories(baseDir);
 
-        // Limpa repositórios antigos (>7 dias)
         cleanOldRepositories(baseDir);
 
-        // Extrai nome do repositório (ex: itau-jwt)
         String repoName = gitUrl.substring(gitUrl.lastIndexOf('/') + 1).replace(".git", "");
         Path cloneDir = baseDir.resolve(repoName + "_" + System.currentTimeMillis());
         Files.createDirectories(cloneDir);
-        log.info("📂 Clonando repositório para {}", cloneDir);
 
         try {
-            // === Clona repositório ===
+            // Clone rápido (depth=1)
             try (var git = Git.cloneRepository()
                     .setURI(gitUrl)
                     .setDirectory(cloneDir.toFile())
                     .setDepth(1)
                     .call()) {
-                log.info("✅ Clone concluído com sucesso: {}", cloneDir);
+                log.info("✅ Clone concluído: {}", cloneDir);
             }
 
-            // === Corrige pom sem extensão ===
+            // Corrige "pom" sem extensão
             Path pomNoExt = cloneDir.resolve("pom");
-            Path pomXml = cloneDir.resolve("pom.xml");
-            if (Files.exists(pomNoExt) && !Files.exists(pomXml)) {
-                Files.move(pomNoExt, pomXml, StandardCopyOption.REPLACE_EXISTING);
-                log.info("🧩 Arquivo 'pom' renomeado automaticamente para 'pom.xml'");
+            if (Files.exists(pomNoExt) && !Files.exists(cloneDir.resolve("pom.xml"))) {
+                Files.move(pomNoExt, cloneDir.resolve("pom.xml"), StandardCopyOption.REPLACE_EXISTING);
+                log.info("🧩 Arquivo 'pom' renomeado para 'pom.xml'");
             }
 
-            // === Executa análise ===
-            log.info("🔍 Executando análise do projeto clonado...");
+            // 🧠 Inteligência automática (arquitetura + módulos)
+            applySmartConfiguration(cloneDir);
+
+            // 🔍 Executa análise
             var scan = analyze.execute(cloneDir.toString());
 
-            // === Gera relatórios ===
+            // 📊 Gera relatórios
             Path outDir = Path.of("output", String.valueOf(System.currentTimeMillis()));
             Files.createDirectories(outDir);
             reports.generateAll(scan, cloneDir.toString(), outDir);
 
-            log.info("📊 Análise de repositório concluída com sucesso!");
-            log.info("📤 Artefatos gerados em: {}", outDir);
+            log.info("📊 Análise concluída com sucesso. Artefatos em {}", outDir);
 
             return new AnalyzeResponse(outDir.toAbsolutePath().toString(), scan);
-        }
-        catch (Exception e) {
-            log.error("❌ Erro ao analisar repositório {}: {}", gitUrl, e.getMessage(), e);
-            throw e;
-        }
-        finally {
-            // === Limpeza final ===
+        } finally {
             try {
                 deleteDirectoryRecursively(cloneDir);
                 log.info("🧹 Diretório temporário removido: {}", cloneDir);
             } catch (Exception ex) {
-                log.warn("⚠️ Falha ao remover diretório temporário {}: {}", cloneDir, ex.getMessage());
+                log.warn("⚠️ Falha ao remover diretório temporário: {}", ex.getMessage());
             }
         }
     }
@@ -143,16 +143,15 @@ public class ProjectController {
                 }
             }
         }
-        log.info("📦 Arquivo ZIP extraído em: {}", outputDir);
+        log.info("📂 ZIP extraído em {}", outputDir);
     }
 
     private void deleteDirectoryRecursively(Path path) throws Exception {
-        if (path != null && Files.exists(path)) {
-            Files.walk(path)
-                    .sorted(Comparator.reverseOrder())
-                    .map(Path::toFile)
-                    .forEach(File::delete);
-        }
+        if (path == null || !Files.exists(path)) return;
+        Files.walk(path)
+                .sorted(Comparator.reverseOrder())
+                .map(Path::toFile)
+                .forEach(File::delete);
     }
 
     private void cleanOldRepositories(Path baseDir) {
@@ -172,11 +171,31 @@ public class ProjectController {
                             deleteDirectoryRecursively(p);
                             log.info("🧹 Repositório antigo removido: {}", p);
                         } catch (Exception e) {
-                            log.warn("Falha ao limpar repositório antigo {}: {}", p, e.getMessage());
+                            log.warn("Falha ao limpar repositório {}: {}", p, e.getMessage());
                         }
                     });
         } catch (Exception e) {
-            log.warn("⚠️ Falha ao limpar repositórios antigos: {}", e.getMessage());
+            log.warn("⚠️ Erro ao limpar repositórios antigos: {}", e.getMessage());
+        }
+    }
+
+    // ================================================================
+    // 🧠 CONFIGURAÇÃO INTELIGENTE
+    // ================================================================
+    private void applySmartConfiguration(Path projectPath) {
+        try {
+            log.info("🧠 Aplicando inteligência automática...");
+            LegacyLensConfigLoader.applyAutoIntelligence(projectPath);
+
+            var cfg = LegacyLensConfigLoader.get();
+            var exec = cfg.getExecution();
+
+            log.info("🔧 YAML ativo: sequence={} multiModule={}",
+                    cfg.getSequence().isEnabled(),
+                    exec != null && exec.isDetectMultiModule());
+
+        } catch (Exception e) {
+            log.warn("⚠️ Falha ao aplicar inteligência automática: {}", e.getMessage());
         }
     }
 }
