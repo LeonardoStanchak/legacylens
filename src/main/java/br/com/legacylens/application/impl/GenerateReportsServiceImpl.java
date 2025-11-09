@@ -36,11 +36,11 @@ public class GenerateReportsServiceImpl implements GenerateReportsService {
         log.info("Gerando relatórios do projeto analisado em {}", outDir);
         try {
             log.info("📘 Gerando diagrama estrutural UML...");
-            uml.generateFromPathOrJar(source, outDir);
-
+            var  uml1 = uml.generateFromPathOrJar(source, outDir);
+            log.info("chamou", uml1);
             log.info("📗 Gerando diagrama de sequência...");
-            sequence.generateFromPathOrJar(source, outDir);
-
+            var sequenceUml = sequence.generateFromPathOrJar(source, outDir);
+            log.info("chamou a sequencia do uml", sequenceUml);
             log.info("📊 Gerando planilha Excel...");
             excel.write(scan, outDir);
 

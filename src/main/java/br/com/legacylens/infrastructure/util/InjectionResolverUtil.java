@@ -1,62 +1,76 @@
 package br.com.legacylens.infrastructure.util;
 
 import lombok.experimental.UtilityClass;
-import lombok.extern.slf4j.Slf4j;
 
-import java.util.HashMap;
-import java.util.Map;
-import java.util.Set;
+import java.util.*;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
-@Slf4j
 @UtilityClass
 public class InjectionResolverUtil {
 
     /**
-     * Detecta variáveis injetadas de acordo com a arquitetura do projeto.
+     * Retorna um mapa varName -> TypeName para as dependências injetadas no conteúdo.
+     * Suporta:
+     * - @Autowired/@Inject em campo
+     * - Injeção por construtor
+     * - @EJB e @Resource
+     * - Heurística por declaração de campo privada
      */
-    public Map<String, String> detectInjections(String content, Set<String> knownClasses, String architecture) {
+    public Map<String, String> detectInjections(String content, Set<String> knownTargets, String architecture) {
         Map<String, String> map = new HashMap<>();
 
-        // @Autowired / @Inject / @EJB
-        Matcher annotated = Pattern.compile("(?:@Autowired|@Inject|@EJB)?\\s*private\\s+(\\w+)\\s+(\\w+);").matcher(content);
-        while (annotated.find()) {
-            map.put(annotated.group(2), annotated.group(1));
+        // 1) Campos com @Autowired/@Inject/@EJB/@Resource
+        Pattern annField = Pattern.compile("@(?:Autowired|Inject|EJB|Resource)[^\\n]*\\n\\s*private\\s+(\\w+)\\s+(\\w+)\\s*;");
+        Matcher m1 = annField.matcher(content);
+        while (m1.find()) {
+            map.put(m1.group(2), m1.group(1));
         }
 
-        // new SomeService()
-        Matcher directNew = Pattern.compile("new\\s+(\\w+)\\s*\\(").matcher(content);
-        while (directNew.find()) {
-            String type = directNew.group(1);
-            knownClasses.stream()
-                    .filter(k -> k.equalsIgnoreCase(type) || type.toLowerCase().contains(k.toLowerCase()))
-                    .findFirst()
-                    .ifPresent(k -> map.put(k.toLowerCase(), k));
+        // 2) Campos privados típicos (sem anotação)
+        Pattern plainField = Pattern.compile("\\bprivate\\s+(\\w+)\\s+(\\w+)\\s*;");
+        Matcher m2 = plainField.matcher(content);
+        while (m2.find()) {
+            String type = m2.group(1);
+            String var = m2.group(2);
+            if (isKnown(type, knownTargets)) map.putIfAbsent(var, type);
         }
 
-        // EJB InitialContext lookup
-        if ("EJB / Java EE".equals(architecture)) {
-            Matcher ejbLookup = Pattern.compile("lookup\\(\"java:[^\"]+/(\\w+)\"\\)").matcher(content);
-            while (ejbLookup.find()) {
-                String bean = ejbLookup.group(1);
-                map.put(bean.toLowerCase(), bean);
+        // 3) Construtor com args (injeção por construtor)
+        //   public Classe( TipoA a, TipoB b, ... ) { this.a = a; this.b = b; ... }
+        Pattern ctor = Pattern.compile("\\bpublic\\s+\\w+\\s*\\(([^)]*)\\)\\s*\\{");
+        Matcher m3 = ctor.matcher(content);
+        while (m3.find()) {
+            String args = m3.group(1);
+            Matcher arg = Pattern.compile("(\\w+)\\s+(\\w+)").matcher(args);
+            List<String> ctorVars = new ArrayList<>();
+            Map<String, String> ctorTypes = new HashMap<>();
+            while (arg.find()) {
+                String type = arg.group(1);
+                String name = arg.group(2);
+                ctorVars.add(name);
+                ctorTypes.put(name, type);
+            }
+            // this.var = var;
+            Matcher assigns = Pattern.compile("this\\.(\\w+)\\s*=\\s*(\\w+)\\s*;").matcher(content);
+            while (assigns.find()) {
+                String field = assigns.group(1);
+                String passed = assigns.group(2);
+                if (ctorVars.contains(passed)) {
+                    String type = ctorTypes.get(passed);
+                    if (isKnown(type, knownTargets)) map.putIfAbsent(field, type);
+                }
             }
         }
 
-        // Fallback: busca por private Tipo nome; mesmo sem anotação
-        Matcher fallback = Pattern.compile("private\\s+(\\w+)\\s+(\\w+);").matcher(content);
-        while (fallback.find()) {
-            String type = fallback.group(1);
-            String name = fallback.group(2);
-            knownClasses.stream()
-                    .filter(k -> k.equalsIgnoreCase(type)
-                            || k.toLowerCase().contains(name.toLowerCase().replace("service", ""))
-                            || name.toLowerCase().contains(k.toLowerCase().replace("impl", "")))
-                    .findFirst()
-                    .ifPresent(k -> map.put(name, k));
-        }
-
         return map;
+    }
+
+    private boolean isKnown(String type, Set<String> known) {
+        String t = type.toLowerCase().replace("impl", "").replace("repository", "").replace("dao", "").replace("service","");
+        return known.stream().anyMatch(k -> {
+            String kk = k.toLowerCase().replace("impl", "").replace("repository", "").replace("dao", "").replace("service","");
+            return kk.equals(t) || kk.contains(t) || t.contains(kk);
+        });
     }
 }
