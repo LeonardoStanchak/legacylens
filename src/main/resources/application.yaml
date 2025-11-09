@@ -1,0 +1,60 @@
+spring:
+  application:
+    name: legacylens
+
+server:
+  port: 8080
+  servlet:
+    context-path: /
+
+logging:
+  level:
+    root: INFO
+    br.com.legacylens: DEBUG
+  pattern:
+    console: "%d{yyyy-MM-dd HH:mm:ss} [%highlight(%-5level)] %cyan(%logger{36}) - %msg%n"
+
+springdoc:
+  api-docs:
+    path: /api-docs
+  swagger-ui:
+    path: /swagger-ui.html
+    operationsSorter: method
+    tagsSorter: alpha
+    display-request-duration: true
+    doc-expansion: none
+  show-actuator: false
+
+app:
+  output:
+    base-dir: output
+    timestamped: true
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+  endpoint:
+    health:
+      show-details: when_authorized
+
+---
+spring:
+  config:
+    activate:
+      on-profile: dev
+logging:
+  level:
+    root: DEBUG
+    org.springframework.web: INFO
+
+---
+spring:
+  config:
+    activate:
+      on-profile: prod
+logging:
+  level:
+    root: INFO
+    org.springframework.web: WARN
